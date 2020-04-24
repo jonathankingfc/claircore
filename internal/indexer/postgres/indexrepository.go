@@ -6,14 +6,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
-	"github.com/jmoiron/sqlx"
 
 	"github.com/quay/claircore"
 	"github.com/quay/claircore/internal/indexer"
 	"github.com/quay/claircore/pkg/microbatch"
 )
 
-func indexRepositories(ctx context.Context, db *sqlx.DB, pool *pgxpool.Pool, repos []*claircore.Repository, l *claircore.Layer, scnr indexer.VersionedScanner) error {
+func indexRepositories(ctx context.Context, pool *pgxpool.Pool, repos []*claircore.Repository, l *claircore.Layer, scnr indexer.VersionedScanner) error {
 	const (
 		insert = `
 		INSERT INTO repo
@@ -21,25 +20,23 @@ func indexRepositories(ctx context.Context, db *sqlx.DB, pool *pgxpool.Pool, rep
 		VALUES ($1, $2, $3)
 		ON CONFLICT (name, key, uri) DO NOTHING;
 		`
-
-		insertWith = `
-		WITH repositories AS (
+		insertWith = `WITH
+		repositories AS (
 			SELECT id AS repo_id
 			FROM repo
 			WHERE name = $1
 			  AND key = $2
 			  AND uri = $3
 		),
-
-			 scanner AS (
-				 SELECT id AS scanner_id
-				 FROM scanner
-				 WHERE name = $4
-				   AND version = $5
-				   AND kind = $6
-			 )
-		INSERT
-		INTO repo_scanartifact (layer_hash, repo_id, scanner_id)
+		scanner AS (
+			SELECT id AS scanner_id
+			FROM scanner
+			WHERE name = $4
+			  AND version = $5
+			  AND kind = $6
+		)
+		INSERT INTO repo_scanartifact
+			(layer_hash, repo_id, scanner_id)
 		VALUES ($7,
 				(SELECT repo_id FROM repositories),
 				(SELECT scanner_id FROM scanner))

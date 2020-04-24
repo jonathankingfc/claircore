@@ -182,12 +182,12 @@ func Benchmark_IndexPackages(b *testing.B) {
 			ctx, done := context.WithCancel(ctx)
 			defer done()
 			ctx = log.TestLogger(ctx, b)
-			db, store, teardown := TestStore(ctx, b)
+			store, teardown := TestStore(ctx, b)
 			defer teardown()
 
 			// gen a scnr and insert
 			vscnrs := test.GenUniquePackageScanners(1)
-			err := pgtest.InsertUniqueScanners(db, vscnrs)
+			err := pgtest.InsertUniqueScanners(ctx, store.pool, vscnrs)
 
 			// gen packages
 			var pkgs []*claircore.Package

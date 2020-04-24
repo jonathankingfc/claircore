@@ -7,7 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 )
 
 const (
@@ -18,23 +19,23 @@ const (
 // postgres transaction advisor locks to implement a distributed lock.
 type lock struct {
 	// a database instance where we can create pg_advisory locks
-	db *sqlx.DB
-	// the frequency we would like to attempt a lock acquistion
+	pool *pgxpool.Pool
+	// the frequency we would like to attempt a lock acquisition
 	retry time.Duration
-	// mu ensures TryLock() and UnLock() have exclusive access to the locked bool.
+	// mu ensures TryLock() and Unlock() have exclusive access to the locked bool.
 	mu sync.Mutex
 	// whether a lock has been acquired or not
 	locked bool
 	// the key used to identify this unique lock
 	key string
-	// the transcation in which the lock is beind held. commiting this
-	// transaction will release the advisory lock
-	tx *sqlx.Tx
+	// The transaction in which the lock is being held. Committing this
+	// transaction will release the advisory lock.
+	tx pgx.Tx
 }
 
-func NewLock(db *sqlx.DB, retry time.Duration) *lock {
+func NewLock(pool *pgxpool.Pool, retry time.Duration) *lock {
 	return &lock{
-		db:    db,
+		pool:  pool,
 		retry: retry,
 	}
 }
@@ -52,7 +53,7 @@ func (l *lock) Lock(ctx context.Context, key string) error {
 	// checking l.locked bool which l.TryLock flips under mu lock
 	_, err := l.TryLock(ctx, key)
 	if err != nil {
-		return fmt.Errorf("failed at attmpeting initial lock acquition: %v", err)
+		return fmt.Errorf("failed at attempting initial lock acquisition: %v", err)
 	}
 	if l.locked {
 		return nil
@@ -67,7 +68,7 @@ func (l *lock) Lock(ctx context.Context, key string) error {
 		case <-t.C:
 			_, err := l.TryLock(ctx, key)
 			if err != nil {
-				return fmt.Errorf("failed at attmpeting initial lock acquition: %v", err)
+				return fmt.Errorf("failed at attempting initial lock acquisition: %v", err)
 			}
 		case <-ctx.Done():
 			return fmt.Errorf("context canceled: %v", ctx.Err())
@@ -77,10 +78,10 @@ func (l *lock) Lock(ctx context.Context, key string) error {
 	return nil
 }
 
-// UnLock first checks if the scanLock is in a locked state, secondly checks to
+// Unlock first checks if the scanLock is in a locked state, secondly checks to
 // confirm the tx field is not nil, and lastly will commit the tx allowing
 // other calls to Lock() to succeed and sets l.locked = false.
-func (l *lock) Unlock() error {
+func (l *lock) Unlock(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -88,17 +89,16 @@ func (l *lock) Unlock() error {
 		return fmt.Errorf("attempted to unlock when no lock has been acquired")
 	}
 	if l.tx == nil {
-		return fmt.Errorf("attempted to unlock but no transaction is populdated in scanLock")
+		return fmt.Errorf("attempted to unlock but no transaction is populated in scanLock")
 	}
 
-	// commiting the transaction will free the pg_advisory lock allowing other
-	// instances utilizing a lock to proceed
-	err := l.tx.Commit()
+	// Committing the transaction will free the pg_advisory lock allowing other
+	// instances utilizing a lock to proceed.
+	err := l.tx.Commit(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to commit transaction and free lock: %v", err)
 	}
 	l.locked = false
-
 	return nil
 }
 
@@ -120,17 +120,15 @@ func (l *lock) TryLock(ctx context.Context, key string) (bool, error) {
 	keyInt64 := int64(kh.Sum64())
 
 	// start transaction
-	tx, err := l.db.Beginx()
+	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return false, err
 	}
 
 	// attempt to acquire lock
 	var acquired bool
-
-	err = tx.Get(&acquired, manifestAdvisoryLock, keyInt64)
-	if err != nil {
-		tx.Rollback()
+	if err := tx.QueryRow(ctx, manifestAdvisoryLock, keyInt64).Scan(&acquired); err != nil {
+		tx.Rollback(ctx)
 		return false, fmt.Errorf("failed to issue pg_advisory lock query: %v", err)
 	}
 
@@ -144,6 +142,6 @@ func (l *lock) TryLock(ctx context.Context, key string) (bool, error) {
 	}
 
 	// we did not acquire the lock
-	tx.Rollback()
+	tx.Rollback(ctx)
 	return false, nil
 }

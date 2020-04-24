@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
 	"github.com/quay/claircore"
 	"github.com/quay/claircore/internal/indexer"
 	"github.com/quay/claircore/test"
@@ -43,7 +44,7 @@ type e2e struct {
 func TestE2E(t *testing.T) {
 	integration.Skip(t)
 	ctx := context.Background()
-	_, store, teardown := TestStore(ctx, t)
+	store, teardown := TestStore(ctx, t)
 	defer teardown()
 
 	layer := &claircore.Layer{

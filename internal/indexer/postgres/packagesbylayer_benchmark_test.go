@@ -94,27 +94,27 @@ func Benchmark_PackagesByLayer(b *testing.B) {
 			ctx, done := context.WithCancel(ctx)
 			defer done()
 			ctx = log.TestLogger(ctx, b)
-			db, store, teardown := TestStore(ctx, b)
+			store, teardown := TestStore(ctx, b)
 			defer teardown()
 
 			// generate a specific number of packages
 			pkgs := test.GenUniquePackages(bench.pkgs)
 
 			// index them into the database
-			err := pgtest.InsertPackages(db, pkgs)
+			err := pgtest.InsertPackages(ctx, store.pool, pkgs)
 			if err != nil {
 				b.Fatalf("failed to insert packages: %v", err)
 			}
 
 			// create scnr mocks
 			vscnrs := test.GenUniquePackageScanners(bench.scnrs)
-			err = pgtest.InsertUniqueScanners(db, vscnrs)
+			err = pgtest.InsertUniqueScanners(ctx, store.pool, vscnrs)
 			if err != nil {
 				b.Fatalf("failed to insert scnrs: %v", err)
 			}
 
 			// create scanartifacts
-			err = pgtest.InsertPackageScanArtifacts(db, bench.hash, pkgs, vscnrs)
+			err = pgtest.InsertPackageScanArtifacts(ctx, store.pool, bench.hash, pkgs, vscnrs)
 			if err != nil {
 				b.Fatalf("failed to insert scan artifacts for test: %v", err)
 			}

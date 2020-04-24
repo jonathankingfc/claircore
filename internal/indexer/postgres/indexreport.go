@@ -2,10 +2,11 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 
 	"github.com/quay/claircore"
 )
@@ -14,19 +15,18 @@ const (
 	selectIndexReport = `SELECT scan_result FROM indexreport WHERE manifest_hash = $1`
 )
 
-func indexReport(ctx context.Context, db *sqlx.DB, hash claircore.Digest) (*claircore.IndexReport, bool, error) {
-	// TODO Use passed-in Context.
+func indexReport(ctx context.Context, pool *pgxpool.Pool, hash claircore.Digest) (*claircore.IndexReport, bool, error) {
 	// we scan into a jsonbIndexReport which has value/scan method set
 	// then type convert back to scanner.domain object
 	var jsr jsonbIndexReport
 
-	row := db.QueryRow(selectIndexReport, hash)
-	err := row.Scan(&jsr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("store:indexReport failed to retrieve index report: %v", err)
+	err := pool.QueryRow(ctx, selectIndexReport, hash).Scan(&jsr)
+	switch {
+	case err == nil:
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, false, nil
+	default:
+		return nil, false, fmt.Errorf("store:indexReport failed to retrieve scanResult: %v", err)
 	}
 
 	var sr claircore.IndexReport

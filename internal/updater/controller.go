@@ -95,7 +95,7 @@ func (u *Controller) Update(ctx context.Context) error {
 		log.Debug().Msg("another process is updating. waiting till next update interval")
 		return nil
 	}
-	defer u.Lock.Unlock()
+	defer u.Lock.Unlock(ctx)
 
 	// retrieve previous fingerprint. GetUpdateOperations will
 	// return update operations in descending order

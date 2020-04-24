@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/rs/zerolog"
 
 	"github.com/quay/claircore"
@@ -20,7 +20,7 @@ import (
 // database consistent.
 type Libvuln struct {
 	store        vulnstore.Store
-	db           *sqlx.DB
+	pool         *pgxpool.Pool
 	matchers     []driver.Matcher
 	killUpdaters context.CancelFunc
 }
@@ -41,7 +41,7 @@ func New(ctx context.Context, opts *Opts) (*Libvuln, error) {
 		Int32("count", opts.MaxConnPool).
 		Msg("initializing store")
 
-	db, vulnstore, err := initStore(ctx, opts)
+	pool, vulnstore, err := initStore(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func New(ctx context.Context, opts *Opts) (*Libvuln, error) {
 	eC := make(chan error, 1024)
 	dC := make(chan context.CancelFunc, 1)
 	log.Info().Msg("updater initialization start")
-	go initUpdaters(ctx, opts, db, vulnstore, dC, eC)
+	go initUpdaters(ctx, opts, pool, vulnstore, dC, eC)
 	killUpdaters := <-dC
 	log.Info().Msg("updater initialization done")
 	for err := range eC {
@@ -60,7 +60,7 @@ func New(ctx context.Context, opts *Opts) (*Libvuln, error) {
 	}
 	l := &Libvuln{
 		store:        vulnstore,
-		db:           db,
+		pool:         pool,
 		matchers:     opts.Matchers,
 		killUpdaters: killUpdaters,
 	}

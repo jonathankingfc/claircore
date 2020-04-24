@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/rs/zerolog"
 
 	"github.com/quay/claircore"
@@ -24,10 +24,10 @@ type Libindex struct {
 	// holds dependencies for creating a libindex instance
 	*Opts
 	// convenience field for creating scan-time resources that require a database
-	db *sqlx.DB
+	pool *pgxpool.Pool
 	// a Store which will be shared between scanner instances
 	store indexer.Store
-	// a sharable http client
+	// a shareable http client
 	client *http.Client
 	state  string
 }
@@ -43,7 +43,7 @@ func New(ctx context.Context, opts *Opts) (*Libindex, error) {
 		return nil, fmt.Errorf("failed to parse opts: %v", err)
 	}
 
-	db, store, err := initStore(ctx, opts)
+	pool, store, err := initStore(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func New(ctx context.Context, opts *Opts) (*Libindex, error) {
 
 	l := &Libindex{
 		Opts:   opts,
-		db:     db,
+		pool:   pool,
 		store:  store,
 		client: &http.Client{},
 	}
@@ -89,7 +89,8 @@ func New(ctx context.Context, opts *Opts) (*Libindex, error) {
 }
 
 func (l *Libindex) Close(ctx context.Context) error {
-	l.db.Close()
+	l.pool = nil
+	// store closes the pool
 	l.store.Close(ctx)
 	return nil
 }
@@ -147,7 +148,7 @@ func (l *Libindex) index(ctx context.Context, s *controller.Controller, m *clair
 		return ir
 	}
 	defer log.Debug().Msg("unlocked")
-	defer s.Unlock()
+	defer s.Unlock(ctx)
 	log.Debug().Msg("locked")
 	ir := s.Index(ctx, m)
 	return ir

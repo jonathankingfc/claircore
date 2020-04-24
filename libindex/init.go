@@ -2,10 +2,10 @@ package libindex
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/jackc/pgx/v4/pgxpool"
-	"github.com/jmoiron/sqlx"
 	"github.com/remind101/migrate"
 
 	"github.com/quay/claircore/internal/indexer"
@@ -14,7 +14,7 @@ import (
 )
 
 // initialize a indexer.Store given libindex.Opts
-func initStore(ctx context.Context, opts *Opts) (*sqlx.DB, indexer.Store, error) {
+func initStore(ctx context.Context, opts *Opts) (*pgxpool.Pool, indexer.Store, error) {
 	// we are going to use pgx for more control over connection pool and
 	// and a cleaner api around bulk inserts
 	cfg, err := pgxpool.ParseConfig(opts.ConnString)
@@ -27,23 +27,21 @@ func initStore(ctx context.Context, opts *Opts) (*sqlx.DB, indexer.Store, error)
 		return nil, nil, fmt.Errorf("failed to create ConnPool: %v", err)
 	}
 
-	// setup sqlx
-	db, err := sqlx.Open("pgx", opts.ConnString)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open db: %v", err)
-	}
-
 	// do migrations if requested
 	if opts.Migrations {
-
-		migrator := migrate.NewPostgresMigrator(db.DB)
-		migrator.Table = migrations.MigrationTable
-		err := migrator.Exec(migrate.Up, migrations.Migrations...)
+		db, err := sql.Open("pgx", opts.ConnString)
 		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open db: %v", err)
+		}
+		defer db.Close()
+
+		migrator := migrate.NewPostgresMigrator(db)
+		migrator.Table = migrations.MigrationTable
+		if err := migrator.Exec(migrate.Up, migrations.Migrations...); err != nil {
 			return nil, nil, fmt.Errorf("failed to perform migrations: %w", err)
 		}
 	}
 
-	store := postgres.NewStore(db, pool)
-	return db, store, nil
+	store := postgres.NewStore(pool)
+	return pool, store, nil
 }

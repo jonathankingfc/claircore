@@ -11,12 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/mock/gomock"
+
 	"github.com/quay/claircore"
 	"github.com/quay/claircore/internal/matcher"
 	"github.com/quay/claircore/internal/updater"
 	vulnstore "github.com/quay/claircore/internal/vulnstore/postgres"
 	"github.com/quay/claircore/libvuln/driver"
-	distlock "github.com/quay/claircore/pkg/distlock/postgres"
+	"github.com/quay/claircore/pkg/distlock"
 	"github.com/quay/claircore/test"
 	"github.com/quay/claircore/test/integration"
 	"github.com/quay/claircore/test/log"
@@ -27,7 +29,7 @@ func TestMatcherIntegration(t *testing.T) {
 	ctx, done := context.WithCancel(context.Background())
 	defer done()
 	ctx = log.TestLogger(ctx, t)
-	db, store, teardown := vulnstore.TestStore(ctx, t)
+	store, teardown := vulnstore.TestStore(ctx, t)
 	defer teardown()
 	m := &Matcher{}
 	fs, err := filepath.Glob("testdata/*.xml")
@@ -41,12 +43,18 @@ func TestMatcherIntegration(t *testing.T) {
 			t.Error(err)
 			continue
 		}
+		l := distlock.NewMockLocker(gomock.NewController(t))
+		name := fmt.Sprintf("test-%s", filepath.Base(f))
+		gomock.InOrder(
+			l.EXPECT().TryLock(gomock.Any(), name),
+			l.EXPECT().Unlock(gomock.Any()),
+		)
 		us[i] = updater.NewController(&updater.Opts{
-			Name:     fmt.Sprintf("test-%s", filepath.Base(f)),
+			Name:     name,
 			Updater:  u,
 			Store:    store,
 			Interval: -1 * time.Minute,
-			Lock:     distlock.NewLock(db, 2*time.Second),
+			Lock:     l,
 		})
 	}
 	// force update

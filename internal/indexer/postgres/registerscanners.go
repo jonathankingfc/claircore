@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v4/pgxpool"
 
 	"github.com/quay/claircore/internal/indexer"
 )
 
-func registerScanners(ctx context.Context, db *sqlx.DB, scnrs indexer.VersionedScanners) error {
+func registerScanners(ctx context.Context, pool *pgxpool.Pool, scnrs indexer.VersionedScanners) error {
 	const (
 		insertScanner = `
 		INSERT INTO scanner (name, version, kind)
@@ -25,11 +25,10 @@ func registerScanners(ctx context.Context, db *sqlx.DB, scnrs indexer.VersionedS
 		  AND kind = $3;
 		`
 	)
-	// TODO Use passed-in Context.
 	// check if all scanners scanners exist
 	ids := make([]sql.NullInt64, len(scnrs))
 	for i, scnr := range scnrs {
-		err := db.Get(&ids[i], selectScanner, scnr.Name(), scnr.Version(), scnr.Kind())
+		err := pool.QueryRow(ctx, selectScanner, scnr.Name(), scnr.Version(), scnr.Kind()).Scan(&ids[i])
 		if err != nil {
 			fmt.Errorf("failed to get scanner id for scnr %v: %v", scnr, err)
 		}
@@ -39,7 +38,7 @@ func registerScanners(ctx context.Context, db *sqlx.DB, scnrs indexer.VersionedS
 	for i, id := range ids {
 		if !id.Valid {
 			s := scnrs[i]
-			_, err := db.Exec(insertScanner, s.Name(), s.Version(), s.Kind())
+			_, err := pool.Exec(ctx, insertScanner, s.Name(), s.Version(), s.Kind())
 			if err != nil {
 				return fmt.Errorf("failed to insert scanner %v: %v", s, err)
 			}

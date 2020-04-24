@@ -182,10 +182,6 @@ func (s *Controller) Lock(ctx context.Context, hash string) error {
 	return nil
 }
 
-func (s *Controller) Unlock() error {
-	err := s.ScanLock.Unlock()
-	if err != nil {
-		return err
-	}
-	return nil
+func (s *Controller) Unlock(ctx context.Context) error {
+	return s.ScanLock.Unlock(ctx)
 }

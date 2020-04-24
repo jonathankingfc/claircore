@@ -2,17 +2,18 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 
-	"github.com/jmoiron/sqlx"
+	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
 
 	"github.com/quay/claircore"
 	"github.com/quay/claircore/internal/indexer"
 )
 
-func repositoriesByLayer(ctx context.Context, db *sqlx.DB, hash claircore.Digest, scnrs indexer.VersionedScanners) ([]*claircore.Repository, error) {
+func repositoriesByLayer(ctx context.Context, pool *pgxpool.Pool, hash claircore.Digest, scnrs indexer.VersionedScanners) ([]*claircore.Repository, error) {
 	const (
 		selectScanner = `
 		SELECT id
@@ -27,12 +28,11 @@ func repositoriesByLayer(ctx context.Context, db *sqlx.DB, hash claircore.Digest
 			   repo.key,
 			   repo.uri
 		FROM repo_scanartifact
-				 LEFT JOIN repo ON repo_scanartifact.repo_id = repo.id
-		WHERE repo_scanartifact.layer_hash = '%s'
-		  AND repo_scanartifact.scanner_id IN (?);
+			LEFT JOIN repo ON repo_scanartifact.repo_id = repo.id
+		WHERE repo_scanartifact.layer_hash = $1
+		  AND repo_scanartifact.scanner_id = ANY($2);
 		`
 	)
-	// TODO Use passed-in Context.
 	if len(scnrs) == 0 {
 		return []*claircore.Repository{}, nil
 	}
@@ -40,7 +40,7 @@ func repositoriesByLayer(ctx context.Context, db *sqlx.DB, hash claircore.Digest
 	scannerIDs := []int64{}
 	for _, scnr := range scnrs {
 		var scannerID int64
-		err := db.Get(&scannerID, selectScanner, scnr.Name(), scnr.Version(), scnr.Kind())
+		err := pool.QueryRow(ctx, selectScanner, scnr.Name(), scnr.Version(), scnr.Kind()).Scan(&scannerID)
 		if err != nil {
 			return nil, fmt.Errorf("store:repositoriesByLayer failed to retrieve scanner ids for scnr %v: %v", scnr, err)
 		}
@@ -49,20 +49,12 @@ func repositoriesByLayer(ctx context.Context, db *sqlx.DB, hash claircore.Digest
 
 	res := []*claircore.Repository{}
 
-	// rebind see: https://jmoiron.github.io/sqlx/ "in queries" section
-	// we need to format this query since an IN query can only have one bindvar. TODO: confirm this
-	withHash := fmt.Sprintf(query, hash)
-	inQuery, args, err := sqlx.In(withHash, scannerIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to bind scannerIDs to query: %v", err)
-	}
-	inQuery = db.Rebind(inQuery)
-
-	rows, err := db.Queryx(inQuery, args...)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("store:repositoriesByLayer no repositories found for hash %v and scnrs %v", hash, scnrs)
-		}
+	rows, err := pool.Query(ctx, query, hash, scannerIDs)
+	switch {
+	case err == nil:
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("store:repositoriesByLayer no repositories found for hash %v and scnrs %v", hash, scnrs)
+	default:
 		return nil, fmt.Errorf("store:repositoriesByLayer failed to retrieve package rows for hash %v and scanners %v: %v", hash, scnrs, err)
 	}
 	defer rows.Close()
@@ -83,6 +75,9 @@ func repositoriesByLayer(ctx context.Context, db *sqlx.DB, hash claircore.Digest
 		}
 
 		res = append(res, &repo)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return res, nil

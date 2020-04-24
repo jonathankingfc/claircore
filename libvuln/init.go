@@ -2,13 +2,13 @@ package libvuln
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 	_ "github.com/jackc/pgx/v4/stdlib"
-	"github.com/jmoiron/sqlx"
 	"github.com/remind101/migrate"
 
 	"github.com/quay/claircore/internal/updater"
@@ -20,7 +20,7 @@ import (
 
 // initUpdaters provides initial burst control to not launch too many updaters at once.
 // returns any errors on eC and returns a CaneclFunc on dC to stop all updaters
-func initUpdaters(ctx context.Context, opts *Opts, db *sqlx.DB, store vulnstore.Updater, dC chan context.CancelFunc, eC chan error) {
+func initUpdaters(ctx context.Context, opts *Opts, pool *pgxpool.Pool, store vulnstore.Updater, dC chan context.CancelFunc, eC chan error) {
 	controllers := map[string]*updater.Controller{}
 
 	for _, u := range opts.Updaters {
@@ -33,7 +33,7 @@ func initUpdaters(ctx context.Context, opts *Opts, db *sqlx.DB, store vulnstore.
 			Store:         store,
 			Name:          u.Name(),
 			Interval:      opts.UpdateInterval,
-			Lock:          pglock.NewLock(db, time.Duration(0)),
+			Lock:          pglock.NewLock(pool, time.Duration(0)),
 			UpdateOnStart: false,
 		})
 	}
@@ -69,7 +69,7 @@ func initUpdaters(ctx context.Context, opts *Opts, db *sqlx.DB, store vulnstore.
 }
 
 // initStore initializes a vulsntore and returns the underlying db object also
-func initStore(ctx context.Context, opts *Opts) (*sqlx.DB, vulnstore.Store, error) {
+func initStore(ctx context.Context, opts *Opts) (*pgxpool.Pool, vulnstore.Store, error) {
 	// we are going to use pgx for more control over connection pool and
 	// and a cleaner api around bulk inserts
 	cfg, err := pgxpool.ParseConfig(opts.ConnString)
@@ -83,21 +83,21 @@ func initStore(ctx context.Context, opts *Opts) (*sqlx.DB, vulnstore.Store, erro
 		return nil, nil, fmt.Errorf("failed to create ConnPool: %v", err)
 	}
 
-	db, err := sqlx.Open("pgx", opts.ConnString)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to Open db: %v", err)
-	}
-
 	// do migrations if requested
 	if opts.Migrations {
-		migrator := migrate.NewPostgresMigrator(db.DB)
-		migrator.Table = migrations.MigrationTable
-		err := migrator.Exec(migrate.Up, migrations.Migrations...)
+		db, err := sql.Open("pgx", opts.ConnString)
 		if err != nil {
+			return nil, nil, fmt.Errorf("failed to Open db: %v", err)
+		}
+		defer db.Close()
+
+		migrator := migrate.NewPostgresMigrator(db)
+		migrator.Table = migrations.MigrationTable
+		if err := migrator.Exec(migrate.Up, migrations.Migrations...); err != nil {
 			return nil, nil, fmt.Errorf("failed to perform migrations: %w", err)
 		}
 	}
 
-	store := postgres.NewVulnStore(db, pool)
-	return db, store, nil
+	store := postgres.NewVulnStore(pool)
+	return pool, store, nil
 }

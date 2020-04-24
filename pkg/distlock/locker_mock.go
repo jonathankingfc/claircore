@@ -63,15 +63,15 @@ func (mr *MockLockerMockRecorder) TryLock(arg0, arg1 interface{}) *gomock.Call {
 }
 
 // Unlock mocks base method
-func (m *MockLocker) Unlock() error {
+func (m *MockLocker) Unlock(arg0 context.Context) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Unlock")
+	ret := m.ctrl.Call(m, "Unlock", arg0)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Unlock indicates an expected call of Unlock
-func (mr *MockLockerMockRecorder) Unlock() *gomock.Call {
+func (mr *MockLockerMockRecorder) Unlock(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Unlock", reflect.TypeOf((*MockLocker)(nil).Unlock))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Unlock", reflect.TypeOf((*MockLocker)(nil).Unlock), arg0)
 }

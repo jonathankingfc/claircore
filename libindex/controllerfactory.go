@@ -13,7 +13,7 @@ type ControllerFactory func(lib *Libindex, opts *Opts) (*controller.Controller, 
 
 // controllerFactory is the default ControllerFactory
 func controllerFactory(lib *Libindex, opts *Opts) (*controller.Controller, error) {
-	sc := dlpg.NewLock(lib.db, opts.ScanLockRetry)
+	sc := dlpg.NewLock(lib.pool, opts.ScanLockRetry)
 	ft := fetcher.New(lib.client, opts.LayerFetchOpt)
 
 	// convert libindex.Opts to indexer.Opts
