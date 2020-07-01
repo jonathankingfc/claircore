@@ -27,7 +27,7 @@ func TestMatcherIntegration(t *testing.T) {
 	ctx, done := context.WithCancel(context.Background())
 	defer done()
 	ctx = log.TestLogger(ctx, t)
-	db, store, teardown := vulnstore.TestStore(ctx, t)
+	store, teardown := vulnstore.TestStore(ctx, t)
 	defer teardown()
 	m := &Matcher{}
 	fs, err := filepath.Glob("testdata/*.xml")
@@ -46,7 +46,7 @@ func TestMatcherIntegration(t *testing.T) {
 			Updater:  u,
 			Store:    store,
 			Interval: -1 * time.Minute,
-			Lock:     distlock.NewLock(db, 2*time.Second),
+			Lock:     distlock.NewLock(nil, 2*time.Second),
 		})
 	}
 	// force update
